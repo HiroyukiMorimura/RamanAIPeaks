@@ -1705,57 +1705,84 @@ def spectrum_analysis_mode():
                         for i, peak in enumerate(final_peak_data)
                     ])
                     
+                    # 基本解析情報の表示（常に表示）
+                    st.info("🔬 基本解析情報")
+                    st.write("検出されたピークの化学的解釈：")
+                    
+                    # 基本的なピーク解釈
+                    analyzer = RamanSpectrumAnalyzer()
+                    basic_analysis = analyzer._generate_basic_analysis(final_peak_data)
+                    st.markdown(basic_analysis)
+                    
+                    # 基本レポートのダウンロード
+                    basic_report = f"""ラマンスペクトル基本解析レポート
+ファイル名: {file_key}
+解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+=== 検出ピーク情報 ===
+{peak_summary_df.to_string(index=False)}
+
+=== 基本解析 ===
+{basic_analysis}
+"""
+                    st.download_button(
+                        label="📄 基本解析レポートをダウンロード",
+                        data=basic_report,
+                        file_name=f"raman_basic_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain",
+                        key=f"download_basic_report_{file_key}"
+                    )
+                    
                     # AI解析実行ボタン（AI機能有効時のみ表示）
-                    if enable_ai and st.button(f"🧠 AI解析を実行 - {file_key}", key=f"ai_analysis_{file_key}", disabled=not final_peak_data):
-                        # LLMの初期化（必要時のみ）
-                        if st.session_state.simple_llm is None:
-                            st.session_state.simple_llm = SimpleLLM(selected_model)
+                    if enable_ai:
+                        if st.button(f"🧠 AI解析を実行 - {file_key}", key=f"ai_analysis_{file_key}"):
+                            # LLMの初期化（必要時のみ）
+                            if st.session_state.simple_llm is None:
+                                st.session_state.simple_llm = SimpleLLM(selected_model)
+                            
+                            with st.spinner("AI言語モデルで解析中です。しばらくお待ちください..."):
+                                analysis_report = None
+                                start_time = time.time()
                         
-                        with st.spinner("AI言語モデルで解析中です。しばらくお待ちください..."):
-                            analysis_report = None
-                            start_time = time.time()
+                                try:
+                                    # 関連文献を検索（RAG有効時のみ）
+                                    relevant_docs = []
+                                    if enable_rag and hasattr(st.session_state, 'rag_system') and st.session_state.rag_db_built:
+                                        search_terms = ' '.join([f"{p['wavenumber']:.0f}cm-1" for p in final_peak_data[:5]])
+                                        search_query = f"ラマンスペクトロスコピー ピーク {search_terms}"
+                                        relevant_docs = st.session_state.rag_system.search_relevant_documents(search_query, top_k=5)
+                        
+                                    # AIへのプロンプトを生成
+                                    analysis_prompt = analyzer.generate_analysis_prompt(
+                                        peak_data=final_peak_data,
+                                        relevant_docs=relevant_docs,
+                                        user_hint=user_hint
+                                    )
+                                    
+                                    # ストリーム出力用エリア
+                                    st.success("✅ AIの応答（リアルタイム表示）")
+                                    stream_area = st.empty()
+                                    full_response = ""
+                        
+                                    # AIにストリーム形式で問い合わせ
+                                    for chunk in st.session_state.simple_llm.generate_stream_response(analysis_prompt, max_tokens=256):
+                                        full_response += chunk
+                                        stream_area.markdown(full_response)
                     
-                            try:
-                                analyzer = RamanSpectrumAnalyzer()
-                    
-                                # 関連文献を検索（RAG有効時のみ）
-                                relevant_docs = []
-                                if enable_rag and hasattr(st.session_state, 'rag_system') and st.session_state.rag_db_built:
-                                    search_terms = ' '.join([f"{p['wavenumber']:.0f}cm-1" for p in final_peak_data[:5]])
-                                    search_query = f"ラマンスペクトロスコピー ピーク {search_terms}"
-                                    relevant_docs = st.session_state.rag_system.search_relevant_documents(search_query, top_k=5)
-                    
-                                # AIへのプロンプトを生成
-                                analysis_prompt = analyzer.generate_analysis_prompt(
-                                    peak_data=final_peak_data,
-                                    relevant_docs=relevant_docs,
-                                    user_hint=user_hint
-                                )
-                                
-                                # ストリーム出力用エリア
-                                st.success("✅ AIの応答（リアルタイム表示）")
-                                stream_area = st.empty()
-                                full_response = ""
-                    
-                                # AIにストリーム形式で問い合わせ
-                                for chunk in st.session_state.simple_llm.generate_stream_response(analysis_prompt, max_tokens=256):
-                                    full_response += chunk
-                                    stream_area.markdown(full_response)
-                    
-                                # ピーク情報まとめ表
-                                peak_summary_df = pd.DataFrame([
-                                    {
-                                        'ピーク番号': i + 1,
-                                        '波数 (cm⁻¹)': f"{peak['wavenumber']:.1f}",
-                                        '強度': f"{peak['intensity']:.3f}",
-                                        'Prominence': f"{peak['prominence']:.3f}",
-                                        'タイプ': '自動検出' if peak['type'] == 'auto' else '手動追加'
-                                    }
-                                    for i, peak in enumerate(final_peak_data)
-                                ])
-                    
-                                # レポートテキスト生成
-                                analysis_report = f"""ラマンスペクトル解析レポート
+                                    # ピーク情報まとめ表
+                                    peak_summary_df = pd.DataFrame([
+                                        {
+                                            'ピーク番号': i + 1,
+                                            '波数 (cm⁻¹)': f"{peak['wavenumber']:.1f}",
+                                            '強度': f"{peak['intensity']:.3f}",
+                                            'Prominence': f"{peak['prominence']:.3f}",
+                                            'タイプ': '自動検出' if peak['type'] == 'auto' else '手動追加'
+                                        }
+                                        for i, peak in enumerate(final_peak_data)
+                                    ])
+                        
+                                    # レポートテキスト生成
+                                    analysis_report = f"""ラマンスペクトル解析レポート
 ファイル名: {file_key}
 解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 使用モデル: {selected_model}
@@ -1768,65 +1795,37 @@ def spectrum_analysis_mode():
 
 === 参照文献 ===
 """
-                                for i, doc in enumerate(relevant_docs, 1):
-                                    analysis_report += f"{i}. {doc['metadata']['filename']}（類似度: {doc['similarity_score']:.3f}）\n"
-                    
-                                # 処理時間の表示
-                                elapsed = time.time() - start_time
-                                st.info(f"🕒 解析にかかった時間: {elapsed:.2f} 秒")
-                                
-                                # 解析結果をセッションに保存
-                                st.session_state[f"{file_key}_ai_analysis"] = {
-                                    'analysis': full_response,
-                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                    'model': selected_model,
-                                    'peak_data': final_peak_data
-                                }
-                    
-                                # レポートダウンロードボタン
-                                st.download_button(
-                                    label="📄 解析レポートをダウンロード",
-                                    data=analysis_report,
-                                    file_name=f"raman_analysis_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                                    mime="text/plain",
-                                    key=f"download_report_{file_key}"
-                                )
-                    
-                            except Exception as e:
-                                st.error("AI解析中にエラーが発生しました。")
-                                st.code(str(e))
-                    
-                    # 基本解析情報の表示（AI無効時も表示）
-                    elif not enable_ai:
-                        st.info("🔬 基本解析情報")
-                        st.write("検出されたピークの化学的解釈：")
+                                    for i, doc in enumerate(relevant_docs, 1):
+                                        analysis_report += f"{i}. {doc['metadata']['filename']}（類似度: {doc['similarity_score']:.3f}）\n"
                         
-                        # 基本的なピーク解釈
-                        basic_analysis = self._generate_basic_analysis(final_peak_data)
-                        st.markdown(basic_analysis)
+                                    # 処理時間の表示
+                                    elapsed = time.time() - start_time
+                                    st.info(f"🕒 解析にかかった時間: {elapsed:.2f} 秒")
+                                    
+                                    # 解析結果をセッションに保存
+                                    st.session_state[f"{file_key}_ai_analysis"] = {
+                                        'analysis': full_response,
+                                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                        'model': selected_model,
+                                        'peak_data': final_peak_data
+                                    }
                         
-                        # 基本レポートのダウンロード
-                        basic_report = f"""ラマンスペクトル基本解析レポート
-ファイル名: {file_key}
-解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-=== 検出ピーク情報 ===
-{peak_summary_df.to_string(index=False)}
-
-=== 基本解析 ===
-{basic_analysis}
-"""
-                        st.download_button(
-                            label="📄 基本解析レポートをダウンロード",
-                            data=basic_report,
-                            file_name=f"raman_basic_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                            mime="text/plain",
-                            key=f"download_basic_report_{file_key}"
-                        )
+                                    # レポートダウンロードボタン
+                                    st.download_button(
+                                        label="📄 AI解析レポートをダウンロード",
+                                        data=analysis_report,
+                                        file_name=f"raman_ai_analysis_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                        mime="text/plain",
+                                        key=f"download_ai_report_{file_key}"
+                                    )
+                        
+                                except Exception as e:
+                                    st.error("AI解析中にエラーが発生しました。")
+                                    st.code(str(e))
                     
-                    # 過去の解析結果表示
-                    if f"{file_key}_ai_analysis" in st.session_state:
-                        with st.expander("📜 過去の解析結果を表示"):
+                    # 過去の解析結果表示（AI機能有効時のみ）
+                    if enable_ai and f"{file_key}_ai_analysis" in st.session_state:
+                        with st.expander("📜 過去のAI解析結果を表示"):
                             past_analysis = st.session_state[f"{file_key}_ai_analysis"]
                             st.write(f"**解析日時:** {past_analysis['timestamp']}")
                             st.write(f"**使用モデル:** {past_analysis['model']}")
