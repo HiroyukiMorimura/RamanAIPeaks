@@ -1604,10 +1604,7 @@ def main():
     )
     
     st.title("📊 Enhanced Raman Peak Detection Tool with AI Analysis")
-    st.markdown("### 🤖 Powered by Hugging Face Mistral")
-    st.markdown("---")
-        
-    st.sidebar.markdown("---")
+    
     st.sidebar.header("📋 パラメータ設定")
     
     spectrum_analysis_mode()
