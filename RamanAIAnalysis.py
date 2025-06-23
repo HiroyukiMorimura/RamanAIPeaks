@@ -942,8 +942,15 @@ def optimize_thresholds_via_gridsearch(
 def spectrum_analysis_mode():
     st.header("📊 ラマンスペクトル解析")
     
-    # --- LLM/RAG設定セクション ---
+   # --- LLM/RAG設定セクション ---
     st.sidebar.subheader("🤖 AI解析設定")
+    
+    # ✅ 追加（AI有効/無効切り替え）
+    enable_ai = st.sidebar.checkbox(
+        "🧠 AI機能を有効にする",
+        value=True,
+        help="AIによる自動成分推定と考察を実行します。"
+    )
     
     # RAG機能の有効/無効を選択
     enable_rag = st.sidebar.checkbox(
