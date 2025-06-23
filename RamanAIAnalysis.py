@@ -37,7 +37,6 @@ import numpy as np
 # Set matplotlib style
 plt.style.use('default')
 sns.set_palette("husl")
-
 # RAG機能のクラス定義（transformersベース）
 class SimpleRAGSystem:
     def __init__(self, embedding_model_name='sentence-transformers/all-MiniLM-L6-v2'):
