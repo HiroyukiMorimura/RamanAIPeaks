@@ -250,8 +250,9 @@ class HuggingFaceMistralLLM:
         Args:
             model_name: 使用するMistralモデル名
         """
-        login(token=st.secrets["HUGGINGFACEHUB_API_TOKEN"])
-
+        hf_token = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
+        login(token=hf_token)
+        
         self.model_name = model_name
         self.tokenizer = None
         self.model = None
