@@ -27,32 +27,34 @@ import os
 import glob
 import PyPDF2
 import docx
-from huggingface_hub import login
 from datetime import datetime
 from typing import List, Dict, Optional
-from sentence_transformers import SentenceTransformer
 import faiss
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM, pipeline
+import numpy as np
 
 # Set matplotlib style
 plt.style.use('default')
 sns.set_palette("husl")
 
-# RAG機能のクラス定義
-class RamanRAGSystem:
-    def __init__(self, embedding_model_name='all-MiniLM-L6-v2'):
+# RAG機能のクラス定義（transformersベース）
+class SimpleRAGSystem:
+    def __init__(self, embedding_model_name='sentence-transformers/all-MiniLM-L6-v2'):
         """
-        RAGシステムの初期化
+        RAGシステムの初期化（transformersライブラリ使用）
         
         Args:
             embedding_model_name: 使用する埋め込みモデル名
         """
-        self.embedding_model = SentenceTransformer(embedding_model_name)
+        self.embedding_model_name = embedding_model_name
+        self.tokenizer = None
+        self.model = None
         self.vector_db = None
         self.documents = []
         self.document_metadata = []
         self.embedding_dim = None
+        self._model_loaded = False
         
     def extract_text_from_file(self, file_path: str) -> str:
         """
@@ -139,6 +141,85 @@ class RamanRAGSystem:
                 
         return chunks
     
+    def _load_embedding_model(self):
+        """
+        埋め込みモデルを遅延読み込み（transformersライブラリ使用）
+        """
+        if not self._model_loaded:
+            try:
+                with st.spinner("埋め込みモデルを読み込み中..."):
+                    # キャッシュディレクトリを設定
+                    cache_dir = os.path.join(os.getcwd(), "model_cache")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    
+                    # transformersライブラリで直接ロード
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        self.embedding_model_name,
+                        cache_dir=cache_dir,
+                        trust_remote_code=True
+                    )
+                    
+                    self.model = AutoModel.from_pretrained(
+                        self.embedding_model_name,
+                        cache_dir=cache_dir,
+                        torch_dtype=torch.float32,  # float32で安定性を確保
+                        device_map="cpu",  # CPUを強制使用
+                        trust_remote_code=True
+                    )
+                    
+                    self.model.eval()  # 評価モードに設定
+                    self._model_loaded = True
+                    st.success("✅ 埋め込みモデルの読み込み完了")
+            except Exception as e:
+                st.error(f"埋め込みモデルの読み込みに失敗しました: {e}")
+                st.info("💡 RAG機能を無効にしてください")
+                return False
+        return True
+    
+    def _encode_texts(self, texts: List[str]) -> np.ndarray:
+        """
+        テキストリストを埋め込みベクトルに変換
+        
+        Args:
+            texts: エンコードするテキストのリスト
+            
+        Returns:
+            埋め込みベクトルの配列
+        """
+        if not self._model_loaded:
+            return np.array([])
+        
+        embeddings = []
+        batch_size = 8  # メモリ使用量を抑制
+        
+        with torch.no_grad():
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                
+                # トークン化
+                inputs = self.tokenizer(
+                    batch_texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                    return_tensors="pt"
+                )
+                
+                # 埋め込み計算
+                outputs = self.model(**inputs)
+                
+                # プール化（平均）
+                attention_mask = inputs['attention_mask']
+                token_embeddings = outputs.last_hidden_state
+                input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+                sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+                sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+                batch_embeddings = sum_embeddings / sum_mask
+                
+                embeddings.append(batch_embeddings.cpu().numpy())
+        
+        return np.vstack(embeddings) if embeddings else np.array([])
+    
     def build_vector_database(self, folder_path: str):
         """
         指定フォルダから論文を読み込み、ベクトルデータベースを構築
@@ -146,6 +227,10 @@ class RamanRAGSystem:
         Args:
             folder_path: 論文が保存されているフォルダのパス
         """
+        # 埋め込みモデルの読み込み
+        if not self._load_embedding_model():
+            return
+            
         if not os.path.exists(folder_path):
             st.error(f"指定されたフォルダが存在しません: {folder_path}")
             return
@@ -191,7 +276,14 @@ class RamanRAGSystem:
         
         # 埋め込みベクトルを生成
         st.info("埋め込みベクトルを生成中...")
-        embeddings = self.embedding_model.encode(all_chunks, show_progress_bar=True)
+        progress_bar2 = st.progress(0)
+        
+        embeddings = self._encode_texts(all_chunks)
+        progress_bar2.progress(1.0)
+        
+        if len(embeddings) == 0:
+            st.error("埋め込みベクトルの生成に失敗しました。")
+            return
         
         # FAISSインデックスを構築
         self.embedding_dim = embeddings.shape[1]
@@ -220,73 +312,103 @@ class RamanRAGSystem:
         if self.vector_db is None:
             return []
         
-        # クエリの埋め込みベクトルを生成
-        query_embedding = self.embedding_model.encode([query])
-        faiss.normalize_L2(query_embedding.astype(np.float32))
+        # 埋め込みモデルが読み込まれていない場合は読み込み
+        if not self._load_embedding_model():
+            return []
         
-        # 類似文書を検索
-        scores, indices = self.vector_db.search(query_embedding.astype(np.float32), top_k)
-        
-        results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < len(self.documents):
-                results.append({
-                    'text': self.documents[idx],
-                    'metadata': self.document_metadata[idx],
-                    'similarity_score': float(score)
-                })
-        
-        return results
+        try:
+            # クエリの埋め込みベクトルを生成
+            query_embeddings = self._encode_texts([query])
+            if len(query_embeddings) == 0:
+                return []
+            
+            # 正規化
+            faiss.normalize_L2(query_embeddings.astype(np.float32))
+            
+            # 類似文書を検索
+            scores, indices = self.vector_db.search(query_embeddings.astype(np.float32), top_k)
+            
+            results = []
+            for score, idx in zip(scores[0], indices[0]):
+                if idx < len(self.documents):
+                    results.append({
+                        'text': self.documents[idx],
+                        'metadata': self.document_metadata[idx],
+                        'similarity_score': float(score)
+                    })
+            
+            return results
+        except Exception as e:
+            st.error(f"文書検索中にエラーが発生しました: {e}")
+            return []
 
-class HuggingFaceMistralLLM:
+class SimpleLLM:
     """
-    Hugging Face Mistralモデルのラッパークラス
+    シンプルなLLMクラス（軽量版）
     """
     
-    def __init__(self, model_name="mistralai/Mistral-7B-Instruct-v0.2"):
+    def __init__(self, model_name="microsoft/DialoGPT-medium"):
         """
-        Mistralモデルの初期化
+        LLMの初期化
         
         Args:
-            model_name: 使用するMistralモデル名
+            model_name: 使用するモデル名
         """
-        hf_token = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
-        login(token=hf_token)
-        
         self.model_name = model_name
-        self.tokenizer = None
-        self.model = None
         self.pipeline = None
-        self._load_model()
+        self._model_loaded = False
     
     def _load_model(self):
         """
-        モデルとトークナイザーをロード
+        モデルをロード
         """
+        if self._model_loaded:
+            return True
+            
         try:
-            with st.spinner(f"Mistralモデル ({self.model_name}) をロード中..."):
-                # デバイス選択（GPU利用可能なら使用）
-                device = 0 if torch.cuda.is_available() else -1
+            with st.spinner(f"言語モデル ({self.model_name}) をロード中..."):
+                # キャッシュディレクトリを設定
+                cache_dir = os.path.join(os.getcwd(), "model_cache")
+                os.makedirs(cache_dir, exist_ok=True)
                 
-                # パイプラインを作成
-                self.pipeline = pipeline(
-                    "text-generation",
-                    model=self.model_name,
-                    device=device,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    do_sample=True,
-                    temperature=0.3,
-                    max_new_tokens=1024,
-                    return_full_text=False
-                )
+                # 軽量モデルの場合の処理
+                if "DialoGPT" in self.model_name:
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model_name,
+                        device=-1,  # CPU使用を強制
+                        torch_dtype=torch.float32,
+                        cache_dir=cache_dir,
+                        trust_remote_code=True,
+                        max_length=512,
+                        do_sample=True,
+                        temperature=0.7
+                    )
+                else:
+                    # Mistralなど他のモデル
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model_name,
+                        device=-1,  # CPU使用を強制
+                        torch_dtype=torch.float32,
+                        cache_dir=cache_dir,
+                        trust_remote_code=True,
+                        do_sample=True,
+                        temperature=0.3,
+                        max_new_tokens=512,
+                        return_full_text=False
+                    )
                 
-                st.success(f"✅ Mistralモデルのロード完了")
+                self._model_loaded = True
+                st.success(f"✅ 言語モデルのロード完了")
+                return True
                 
         except Exception as e:
-            st.error(f"Mistralモデルのロードに失敗しました: {e}")
-            self.pipeline = None
+            st.error(f"言語モデルのロードに失敗しました: {e}")
+            st.info("💡 解決策: \n1. インターネット接続を確認\n2. AI機能を無効にして基本機能のみ使用")
+            return False
     
-    def generate_response(self, prompt: str, max_tokens: int = 1024) -> str:
+    def generate_response(self, prompt: str, max_tokens: int = 256) -> str:
         """
         プロンプトに対する応答を生成
         
@@ -297,46 +419,58 @@ class HuggingFaceMistralLLM:
         Returns:
             生成された応答テキスト
         """
-        if self.pipeline is None:
-            return "⚠️ モデルが正常にロードされていません。"
+        if not self._load_model():
+            return "⚠️ モデルが利用できません。基本的なピーク解析結果のみ表示しています。"
         
         try:
-            # Mistral用のプロンプトフォーマット
-            formatted_prompt = f"<s>[INST] {prompt} [/INST]"
+            # プロンプトを日本語解析用に最適化
+            formatted_prompt = f"""以下のラマンスペクトル解析データを基に、試料の成分を推定してください。
+
+{prompt}
+
+回答は日本語で、以下の観点から詳しく説明してください：
+1. 各ピークの化学的帰属
+2. 推定される試料の種類
+3. 根拠となるピーク位置の解釈
+
+回答:"""
             
             # テキスト生成
-            response = self.pipeline(
-                formatted_prompt,
-                max_new_tokens=max_tokens,
-                temperature=0.3,
-                do_sample=True,
-                pad_token_id=self.pipeline.tokenizer.eos_token_id
-            )
+            if "DialoGPT" in self.model_name:
+                response = self.pipeline(
+                    formatted_prompt,
+                    max_length=len(formatted_prompt) + max_tokens,
+                    num_return_sequences=1,
+                    pad_token_id=self.pipeline.tokenizer.eos_token_id
+                )
+                generated_text = response[0]['generated_text']
+                # プロンプト部分を除去
+                result = generated_text[len(formatted_prompt):].strip()
+            else:
+                response = self.pipeline(
+                    formatted_prompt,
+                    max_new_tokens=max_tokens,
+                    num_return_sequences=1,
+                    pad_token_id=self.pipeline.tokenizer.eos_token_id
+                )
+                result = response[0]['generated_text'].strip()
             
-            return response[0]['generated_text'].strip()
+            return result if result else "解析を実行しましたが、具体的な推定結果を生成できませんでした。"
             
         except Exception as e:
             return f"⚠️ 応答生成中にエラーが発生しました: {e}"
     
-    def generate_stream_response(self, prompt: str, max_tokens: int = 1024):
+    def generate_stream_response(self, prompt: str, max_tokens: int = 256):
         """
         ストリーミング形式で応答を生成（簡易版）
-        
-        Args:
-            prompt: 入力プロンプト
-            max_tokens: 最大トークン数
-            
-        Yields:
-            生成されたテキストの断片
         """
-        # 注: 本来のストリーミングは複雑なため、ここでは全文生成後に分割して返す
         full_response = self.generate_response(prompt, max_tokens)
         
         # 文字単位でストリーミング風に返す
-        for i in range(0, len(full_response), 10):
-            chunk = full_response[i:i+10]
+        for i in range(0, len(full_response), 5):
+            chunk = full_response[i:i+5]
             yield chunk
-            time.sleep(0.05)  # 視覚効果のための遅延
+            time.sleep(0.03)  # 視覚効果のための遅延
 
 class RamanSpectrumAnalyzer:
     def generate_analysis_prompt(
@@ -424,6 +558,92 @@ class RamanSpectrumAnalyzer:
         )
 
         return "\n".join(sections)
+    
+    def _generate_basic_analysis(self, peak_data: List[Dict]) -> str:
+        """
+        基本的なピーク解析を生成（AI不使用）
+        
+        Args:
+            peak_data: ピーク情報のリスト
+            
+        Returns:
+            基本解析テキスト
+        """
+        # 一般的なラマンピークの解釈テーブル
+        common_peaks = {
+            (400, 500): "金属酸化物の結合振動",
+            (500, 600): "S-S結合、金属-酸素結合",
+            (600, 800): "C-S結合、芳香環の変角振動",
+            (800, 1000): "C-C結合の伸縮振動",
+            (1000, 1200): "C-O結合、C-N結合の伸縮振動",
+            (1200, 1400): "C-H結合の変角振動",
+            (1400, 1600): "C=C結合の伸縮振動（芳香環）",
+            (1600, 1800): "C=O結合の伸縮振動",
+            (2800, 3000): "C-H結合の伸縮振動（アルキル）",
+            (3000, 3200): "C-H結合の伸縮振動（芳香環）",
+            (3200, 3600): "O-H結合の伸縮振動",
+        }
+        
+        analysis_parts = ["## 検出ピークの化学的解釈\n"]
+        
+        for i, peak in enumerate(peak_data, 1):
+            wavenumber = peak['wavenumber']
+            intensity = peak['intensity']
+            peak_type = '自動検出' if peak['type'] == 'auto' else '手動追加'
+            
+            # ピーク解釈を検索
+            interpretations = []
+            for (min_wn, max_wn), description in common_peaks.items():
+                if min_wn <= wavenumber <= max_wn:
+                    interpretations.append(description)
+            
+            analysis_parts.append(f"**ピーク {i} ({wavenumber:.1f} cm⁻¹, {peak_type})**")
+            if interpretations:
+                analysis_parts.append(f"- 推定結合: {', '.join(interpretations)}")
+            else:
+                analysis_parts.append("- 推定結合: 特定の結合の同定が困難")
+            
+            # 強度による解釈
+            if intensity > 0.8:
+                analysis_parts.append("- 強度: 非常に強い（主要成分の特徴的ピーク）")
+            elif intensity > 0.5:
+                analysis_parts.append("- 強度: 強い（重要な構造成分）")
+            elif intensity > 0.2:
+                analysis_parts.append("- 強度: 中程度（副次的成分）")
+            else:
+                analysis_parts.append("- 強度: 弱い（微量成分または雑音）")
+            
+            analysis_parts.append("")
+        
+        # 全体的な傾向分析
+        analysis_parts.append("## 試料の特徴推定\n")
+        
+        wavenumbers = [p['wavenumber'] for p in peak_data]
+        
+        # 有機物vs無機物の判定
+        organic_count = sum(1 for wn in wavenumbers if 800 <= wn <= 3600)
+        inorganic_count = sum(1 for wn in wavenumbers if 200 <= wn <= 800)
+        
+        if organic_count > inorganic_count:
+            analysis_parts.append("- **有機化合物の特徴が強い**: C-H, C=C, C=O等の有機結合が多数検出")
+        elif inorganic_count > organic_count:
+            analysis_parts.append("- **無機化合物の特徴が強い**: 金属酸化物や無機結合が主要")
+        else:
+            analysis_parts.append("- **有機・無機混合物の可能性**: 両方の特徴を含有")
+        
+        # 特定の化合物群の推定
+        if any(1300 <= wn <= 1400 for wn in wavenumbers):
+            analysis_parts.append("- **炭素系材料の可能性**: グラファイト系材料のD-bandが検出される可能性")
+        
+        if any(1580 <= wn <= 1590 for wn in wavenumbers):
+            analysis_parts.append("- **グラファイト系材料**: G-bandが検出される可能性")
+        
+        if any(2800 <= wn <= 3000 for wn in wavenumbers):
+            analysis_parts.append("- **高分子材料の可能性**: アルキル基C-H伸縮が検出")
+        
+        analysis_parts.append("\n**注意**: この解析は一般的なピーク帰属に基づく推定です。正確な同定には追加の分析手法との組み合わせが必要です。")
+        
+        return "\n".join(analysis_parts)
 
 # 既存の関数群（変更なし）
 def create_features_labels(spectra, window_size=10):
@@ -725,67 +945,94 @@ def spectrum_analysis_mode():
     # --- LLM/RAG設定セクション ---
     st.sidebar.subheader("🤖 AI解析設定")
     
+    # RAG機能の有効/無効を選択
+    enable_rag = st.sidebar.checkbox(
+        "📚 RAG機能を有効にする",
+        value=False,
+        help="論文データベースからの情報検索機能。無効にすると軽量化されます。"
+    )
+    
     # Mistralモデル選択
     model_options = [
+        "microsoft/DialoGPT-medium",  # より軽量な代替モデル
         "mistralai/Mistral-7B-Instruct-v0.2",
         "mistralai/Mistral-7B-Instruct-v0.1",
         "mistralai/Mixtral-8x7B-Instruct-v0.1"
     ]
     
     selected_model = st.sidebar.selectbox(
-        "🧠 使用するMistralモデル",
+        "🧠 使用するモデル",
         model_options,
         index=0,
-        help="使用するHugging Face Mistralモデルを選択してください"
+        help="使用するHugging Faceモデルを選択してください。上位ほど軽量です。"
     )
     
-    # ファイルアップロード（複数可）
-    uploaded_files = st.sidebar.file_uploader(
-        "📄 文献PDFを選択してください（複数可）",
-        type=["pdf"],
-        accept_multiple_files=True
-    )
+    # RAG機能が有効な場合のみファイルアップロード表示
+    uploaded_files = []
+    if enable_rag:
+        uploaded_files = st.sidebar.file_uploader(
+            "📄 文献PDFを選択してください（複数可）",
+            type=["pdf"],
+            accept_multiple_files=True
+        )
     
     # 一時保存用ディレクトリ
     TEMP_DIR = "./tmp_uploads"
     os.makedirs(TEMP_DIR, exist_ok=True)
     
-    # RAGシステムとMistralLLMの初期化
-    if 'rag_system' not in st.session_state:
-        st.session_state.rag_system = RamanRAGSystem()
-        st.session_state.rag_db_built = False
-    
-    if 'mistral_llm' not in st.session_state:
-        st.session_state.mistral_llm = None
-        st.session_state.current_model = None
+    # RAGシステムの初期化（必要時のみ）
+    if enable_rag:
+        if 'rag_system' not in st.session_state:
+            st.session_state.rag_system = SimpleRAGSystem()
+            st.session_state.rag_db_built = False
         
-    # モデル変更時の再初期化
-    if st.session_state.current_model != selected_model:
-        st.session_state.mistral_llm = None
-        st.session_state.current_model = selected_model
-        
-    # ファイルを保存し、ベクトルDBを構築
-    if st.sidebar.button("📚 論文データベース構築"):
-        if not uploaded_files:
-            st.sidebar.warning("文献ファイルを選択してください。")
-        else:
-            with st.spinner("論文をアップロードし、データベースを構築中..."):
-                # アップロードされたファイルを一時保存
-                for uploaded_file in uploaded_files:
-                    save_path = os.path.join(TEMP_DIR, uploaded_file.name)
-                    with open(save_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+        # ファイルを保存し、ベクトルDBを構築
+        if st.sidebar.button("📚 論文データベース構築"):
+            if not uploaded_files:
+                st.sidebar.warning("文献ファイルを選択してください。")
+            else:
+                with st.spinner("論文をアップロードし、データベースを構築中..."):
+                    # アップロードされたファイルを一時保存
+                    for uploaded_file in uploaded_files:
+                        save_path = os.path.join(TEMP_DIR, uploaded_file.name)
+                        with open(save_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
 
-                # 保存したフォルダを使ってベクトルDB構築
-                st.session_state.rag_system.build_vector_database(TEMP_DIR)
-                st.session_state.rag_db_built = True
-                st.sidebar.success(f"✅ {len(uploaded_files)} 件のPDFからデータベースを構築しました。")
-    
-    # データベース状態表示
-    if st.session_state.rag_db_built:
-        st.sidebar.success("✅ 論文データベース構築済み")
+                    # 保存したフォルダを使ってベクトルDB構築
+                    st.session_state.rag_system.build_vector_database(TEMP_DIR)
+                    st.session_state.rag_db_built = True
+                    st.sidebar.success(f"✅ {len(uploaded_files)} 件のPDFからデータベースを構築しました。")
+        
+        # データベース状態表示
+        if st.session_state.rag_db_built:
+            st.sidebar.success("✅ 論文データベース構築済み")
+        else:
+            st.sidebar.info("ℹ️ 論文データベース未構築")
     else:
-        st.sidebar.info("ℹ️ 論文データベース未構築")
+        # RAG無効時の状態初期化
+        if 'rag_system' in st.session_state:
+            del st.session_state.rag_system
+        st.session_state.rag_db_built = False
+        st.sidebar.info("💨 軽量モード（RAG機能無効）")
+    
+    # LLMの初期化（AI機能有効時のみ）
+    if enable_ai:
+        if 'simple_llm' not in st.session_state:
+            st.session_state.simple_llm = None
+            st.session_state.current_model = None
+            
+        # モデル変更時の再初期化
+        if st.session_state.current_model != selected_model:
+            st.session_state.simple_llm = None
+            st.session_state.current_model = selected_model
+        
+        st.sidebar.success("🤖 AI解析機能有効")
+    else:
+        # AI無効時の状態初期化
+        if 'simple_llm' in st.session_state:
+            del st.session_state.simple_llm
+        st.session_state.current_model = None
+        st.sidebar.info("💨 軽量モード（AI機能無効）")
     
     # サイドバーに補足指示欄を追加
     user_hint = st.sidebar.text_area(
@@ -1458,24 +1705,25 @@ def spectrum_analysis_mode():
                         for i, peak in enumerate(final_peak_data)
                     ])
                     
-                    # Mistral LLMの初期化（必要時のみ）
-                    if st.session_state.mistral_llm is None:
-                        with st.spinner(f"Mistralモデル ({selected_model}) を初期化中..."):
-                            st.session_state.mistral_llm = HuggingFaceMistralLLM(selected_model)
-                    
-                    # AI解析実行ボタン
-                    if st.button(f"🧠 AI解析を実行 - {file_key}", key=f"ai_analysis_{file_key}", disabled=not final_peak_data):
-                        with st.spinner("Hugging Face Mistralで解析中です。しばらくお待ちください..."):
+                    # AI解析実行ボタン（AI機能有効時のみ表示）
+                    if enable_ai and st.button(f"🧠 AI解析を実行 - {file_key}", key=f"ai_analysis_{file_key}", disabled=not final_peak_data):
+                        # LLMの初期化（必要時のみ）
+                        if st.session_state.simple_llm is None:
+                            st.session_state.simple_llm = SimpleLLM(selected_model)
+                        
+                        with st.spinner("AI言語モデルで解析中です。しばらくお待ちください..."):
                             analysis_report = None
                             start_time = time.time()
                     
                             try:
                                 analyzer = RamanSpectrumAnalyzer()
                     
-                                # 関連文献を検索（上位5件）
-                                search_terms = ' '.join([f"{p['wavenumber']:.0f}cm-1" for p in final_peak_data[:5]])
-                                search_query = f"ラマンスペクトロスコピー ピーク {search_terms}"
-                                relevant_docs = st.session_state.rag_system.search_relevant_documents(search_query, top_k=5)
+                                # 関連文献を検索（RAG有効時のみ）
+                                relevant_docs = []
+                                if enable_rag and hasattr(st.session_state, 'rag_system') and st.session_state.rag_db_built:
+                                    search_terms = ' '.join([f"{p['wavenumber']:.0f}cm-1" for p in final_peak_data[:5]])
+                                    search_query = f"ラマンスペクトロスコピー ピーク {search_terms}"
+                                    relevant_docs = st.session_state.rag_system.search_relevant_documents(search_query, top_k=5)
                     
                                 # AIへのプロンプトを生成
                                 analysis_prompt = analyzer.generate_analysis_prompt(
@@ -1485,16 +1733,12 @@ def spectrum_analysis_mode():
                                 )
                                 
                                 # ストリーム出力用エリア
-                                st.success("✅ Mistralの応答（リアルタイム表示）")
+                                st.success("✅ AIの応答（リアルタイム表示）")
                                 stream_area = st.empty()
                                 full_response = ""
                     
-                                # Mistralにストリーム形式で問い合わせ
-                                system_prompt = "あなたはラマンスペクトロスコピーの専門家です。ピーク位置と論文を比較して、このサンプルが何の試料なのか当ててください。すべて日本語で答えてください。"
-                                full_prompt = f"{system_prompt}\n\n{analysis_prompt}\n\nすべて日本語で詳しく説明してください。"
-                                
-                                # ストリーミング応答の生成と表示
-                                for chunk in st.session_state.mistral_llm.generate_stream_response(full_prompt, max_tokens=1024):
+                                # AIにストリーム形式で問い合わせ
+                                for chunk in st.session_state.simple_llm.generate_stream_response(analysis_prompt, max_tokens=256):
                                     full_response += chunk
                                     stream_area.markdown(full_response)
                     
@@ -1551,7 +1795,34 @@ def spectrum_analysis_mode():
                             except Exception as e:
                                 st.error("AI解析中にエラーが発生しました。")
                                 st.code(str(e))
-                                st.error("GPUメモリ不足の可能性があります。より小さなモデルを試すか、システムを再起動してください。")
+                    
+                    # 基本解析情報の表示（AI無効時も表示）
+                    elif not enable_ai:
+                        st.info("🔬 基本解析情報")
+                        st.write("検出されたピークの化学的解釈：")
+                        
+                        # 基本的なピーク解釈
+                        basic_analysis = self._generate_basic_analysis(final_peak_data)
+                        st.markdown(basic_analysis)
+                        
+                        # 基本レポートのダウンロード
+                        basic_report = f"""ラマンスペクトル基本解析レポート
+ファイル名: {file_key}
+解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+=== 検出ピーク情報 ===
+{peak_summary_df.to_string(index=False)}
+
+=== 基本解析 ===
+{basic_analysis}
+"""
+                        st.download_button(
+                            label="📄 基本解析レポートをダウンロード",
+                            data=basic_report,
+                            file_name=f"raman_basic_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain",
+                            key=f"download_basic_report_{file_key}"
+                        )
                     
                     # 過去の解析結果表示
                     if f"{file_key}_ai_analysis" in st.session_state:
@@ -1604,7 +1875,10 @@ def main():
     )
     
     st.title("📊 Enhanced Raman Peak Detection Tool with AI Analysis")
-    
+    st.markdown("### 🤖 Powered by Hugging Face Mistral")
+    st.markdown("---")
+        
+    st.sidebar.markdown("---")
     st.sidebar.header("📋 パラメータ設定")
     
     spectrum_analysis_mode()
