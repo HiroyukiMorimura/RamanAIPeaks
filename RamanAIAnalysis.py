@@ -461,16 +461,17 @@ class SimpleLLM:
             return f"⚠️ 応答生成中にエラーが発生しました: {e}"
     
     def generate_stream_response(self, prompt: str, max_tokens: int = 256):
-        """
-        ストリーミング形式で応答を生成（簡易版）
-        """
         full_response = self.generate_response(prompt, max_tokens)
         
-        # 文字単位でストリーミング風に返す
+        if not full_response:
+            yield "⚠️ 応答が生成されませんでした。モデルまたはプロンプトに問題があります。"
+            return
+    
         for i in range(0, len(full_response), 5):
             chunk = full_response[i:i+5]
+            print(chunk)  # デバッグ用
             yield chunk
-            time.sleep(0.03)  # 視覚効果のための遅延
+            time.sleep(0.03)
 
 class RamanSpectrumAnalyzer:
     def generate_analysis_prompt(
