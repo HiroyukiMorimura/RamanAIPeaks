@@ -462,14 +462,13 @@ class SimpleLLM:
     
     def generate_stream_response(self, prompt: str, max_tokens: int = 256):
         full_response = self.generate_response(prompt, max_tokens)
-        
+    
         if not full_response:
-            yield "⚠️ 応答が生成されませんでした。モデルまたはプロンプトに問題があります。"
+            yield "⚠️ 応答が生成されませんでした。プロンプトまたはモデルの設定を確認してください。"
             return
     
         for i in range(0, len(full_response), 5):
             chunk = full_response[i:i+5]
-            print(chunk)  # デバッグ用
             yield chunk
             time.sleep(0.03)
 
