@@ -1,3 +1,4 @@
+# 基本的なStreamlitアプリケーション
 streamlit>=1.28.0
 numpy>=1.24.0
 pandas>=2.0.0
@@ -6,10 +7,19 @@ matplotlib>=3.7.0
 plotly>=5.15.0
 scipy>=1.11.0
 streamlit-plotly-events>=0.0.6
+
+# ファイル処理
 PyPDF2>=3.0.0
 python-docx>=0.8.11
-sentence-transformers>=2.2.0
-faiss-cpu>=1.7.4
+
+# AI/ML関連（オプション - AI機能を使わない場合は不要）
 torch>=2.0.0
 transformers>=4.35.0
+tokenizers>=0.14.0
+huggingface-hub>=0.17.0
+
+# RAG機能用（オプション - RAG機能を使わない場合は不要）
+faiss-cpu>=1.7.4
+
+# 軽量化のための設定
 accelerate>=0.24.0
