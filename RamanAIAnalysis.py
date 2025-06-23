@@ -27,6 +27,7 @@ import os
 import glob
 import PyPDF2
 import docx
+from huggingface_hub import login
 from datetime import datetime
 from typing import List, Dict, Optional
 from sentence_transformers import SentenceTransformer
@@ -249,6 +250,8 @@ class HuggingFaceMistralLLM:
         Args:
             model_name: 使用するMistralモデル名
         """
+        login(token=st.secrets["HUGGINGFACEHUB_API_TOKEN"])
+
         self.model_name = model_name
         self.tokenizer = None
         self.model = None
