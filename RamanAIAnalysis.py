@@ -1521,13 +1521,12 @@ def spectrum_analysis_mode():
 
 def main():
     st.set_page_config(
-        page_title="Enhanced Raman Peak Detection Tool with Hugging Face Mistral", 
+        page_title="AIによるラマンピーク解析", 
         page_icon="📊", 
         layout="wide"
     )
     
-    st.title("📊 Enhanced Raman Peak Detection Tool with AI Analysis")
-    st.markdown("### 🤖 Powered by Hugging Face Mistral")
+    st.title("📊 AIによるラマンピーク解析")
     st.markdown("---")
         
     st.sidebar.markdown("---")
