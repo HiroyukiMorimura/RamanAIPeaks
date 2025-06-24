@@ -13,7 +13,6 @@ PyPDF2>=3.0.0
 python-docx>=0.8.11
 
 # AI/ML関連（Rinna GPT2などの利用に必須）
-# transformers[sentencepiece]>=4.35.0
 torch>=2.0.0
 tokenizers>=0.14.0
 protobuf>=3.20.0
@@ -24,3 +23,7 @@ faiss-cpu>=1.7.4
 # モデル読み込み高速化
 accelerate>=0.24.0
 huggingface-hub>=0.17.0
+
+# 日本語モデル用トークナイザ
+fugashi>=1.2.1
+ipadic>=1.0.0
