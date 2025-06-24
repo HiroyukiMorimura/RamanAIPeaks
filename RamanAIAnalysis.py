@@ -121,9 +121,12 @@ class SimpleRAGSystem:
                     cache_dir = os.path.join(os.getcwd(), "model_cache")
                     os.makedirs(cache_dir, exist_ok=True)
 
+                    import fugashi  # Mecab用依存を明示的にロード
+
                     self.tokenizer = AutoTokenizer.from_pretrained(
                         self.embedding_model_name,
-                        cache_dir=cache_dir
+                        cache_dir=cache_dir,
+                        use_fast=False
                     )
                     self.model = AutoModel.from_pretrained(
                         self.embedding_model_name,
