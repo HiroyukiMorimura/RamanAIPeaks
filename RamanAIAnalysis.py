@@ -31,18 +31,19 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import faiss
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM, pipeline
 import numpy as np
 
 # Set matplotlib style
 plt.style.use('default')
 sns.set_palette("husl")
+
 # RAG機能のクラス定義（transformersベース）
 class SimpleRAGSystem:
-    def __init__(self, embedding_model_name='sentence-transformers/all-MiniLM-L6-v2'):
+    def __init__(self, embedding_model_name='cl-tohoku/bert-base-japanese'):
         """
         RAGシステムの初期化（transformersライブラリ使用）
-        
+
         Args:
             embedding_model_name: 使用する埋め込みモデル名
         """
@@ -54,20 +55,10 @@ class SimpleRAGSystem:
         self.document_metadata = []
         self.embedding_dim = None
         self._model_loaded = False
-        
+
     def extract_text_from_file(self, file_path: str) -> str:
-        """
-        ファイルからテキストを抽出
-        
-        Args:
-            file_path: ファイルパス
-            
-        Returns:
-            抽出されたテキスト
-        """
         try:
             file_ext = os.path.splitext(file_path)[1].lower()
-            
             if file_ext == '.pdf':
                 return self._extract_from_pdf(file_path)
             elif file_ext == '.docx':
@@ -79,9 +70,8 @@ class SimpleRAGSystem:
         except Exception as e:
             st.error(f"ファイル {file_path} の読み込みエラー: {e}")
             return ""
-    
+
     def _extract_from_pdf(self, file_path: str) -> str:
-        """PDFからテキスト抽出"""
         text = ""
         try:
             with open(file_path, 'rb') as file:
@@ -91,19 +81,16 @@ class SimpleRAGSystem:
         except Exception as e:
             st.error(f"PDF読み込みエラー: {e}")
         return text
-    
+
     def _extract_from_docx(self, file_path: str) -> str:
-        """DOCXからテキスト抽出"""
         try:
             doc = docx.Document(file_path)
-            text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-            return text
+            return "\n".join([p.text for p in doc.paragraphs])
         except Exception as e:
             st.error(f"DOCX読み込みエラー: {e}")
             return ""
-    
+
     def _extract_from_txt(self, file_path: str) -> str:
-        """TXTからテキスト抽出"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 return file.read()
@@ -117,56 +104,34 @@ class SimpleRAGSystem:
         except Exception as e:
             st.error(f"TXT読み込みエラー: {e}")
             return ""
-    
+
     def chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-        """
-        テキストをチャンクに分割
-        
-        Args:
-            text: 分割するテキスト
-            chunk_size: チャンクサイズ
-            overlap: オーバーラップサイズ
-            
-        Returns:
-            チャンクのリスト
-        """
         words = text.split()
         chunks = []
-        
         for i in range(0, len(words), chunk_size - overlap):
             chunk = ' '.join(words[i:i + chunk_size])
             if chunk.strip():
                 chunks.append(chunk)
-                
         return chunks
-    
+
     def _load_embedding_model(self):
-        """
-        埋め込みモデルを遅延読み込み（transformersライブラリ使用）
-        """
         if not self._model_loaded:
             try:
                 with st.spinner("埋め込みモデルを読み込み中..."):
-                    # キャッシュディレクトリを設定
                     cache_dir = os.path.join(os.getcwd(), "model_cache")
                     os.makedirs(cache_dir, exist_ok=True)
-                    
-                    # transformersライブラリで直接ロード
+
                     self.tokenizer = AutoTokenizer.from_pretrained(
                         self.embedding_model_name,
-                        cache_dir=cache_dir,
-                        trust_remote_code=True
+                        cache_dir=cache_dir
                     )
-                    
                     self.model = AutoModel.from_pretrained(
                         self.embedding_model_name,
                         cache_dir=cache_dir,
-                        torch_dtype=torch.float32,  # float32で安定性を確保
-                        device_map="cpu",  # CPUを強制使用
-                        trust_remote_code=True
+                        torch_dtype=torch.float32,
+                        device_map="cpu"
                     )
-                    
-                    self.model.eval()  # 評価モードに設定
+                    self.model.eval()
                     self._model_loaded = True
                     st.success("✅ 埋め込みモデルの読み込み完了")
             except Exception as e:
@@ -174,28 +139,15 @@ class SimpleRAGSystem:
                 st.info("💡 RAG機能を無効にしてください")
                 return False
         return True
-    
+
     def _encode_texts(self, texts: List[str]) -> np.ndarray:
-        """
-        テキストリストを埋め込みベクトルに変換
-        
-        Args:
-            texts: エンコードするテキストのリスト
-            
-        Returns:
-            埋め込みベクトルの配列
-        """
         if not self._model_loaded:
             return np.array([])
-        
         embeddings = []
-        batch_size = 8  # メモリ使用量を抑制
-        
+        batch_size = 8
         with torch.no_grad():
             for i in range(0, len(texts), batch_size):
                 batch_texts = texts[i:i + batch_size]
-                
-                # トークン化
                 inputs = self.tokenizer(
                     batch_texts,
                     padding=True,
@@ -203,62 +155,37 @@ class SimpleRAGSystem:
                     max_length=512,
                     return_tensors="pt"
                 )
-                
-                # 埋め込み計算
                 outputs = self.model(**inputs)
-                
-                # プール化（平均）
                 attention_mask = inputs['attention_mask']
                 token_embeddings = outputs.last_hidden_state
                 input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
                 sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
                 sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
                 batch_embeddings = sum_embeddings / sum_mask
-                
                 embeddings.append(batch_embeddings.cpu().numpy())
-        
         return np.vstack(embeddings) if embeddings else np.array([])
-    
+
     def build_vector_database(self, folder_path: str):
-        """
-        指定フォルダから論文を読み込み、ベクトルデータベースを構築
-        
-        Args:
-            folder_path: 論文が保存されているフォルダのパス
-        """
-        # 埋め込みモデルの読み込み
         if not self._load_embedding_model():
             return
-            
         if not os.path.exists(folder_path):
             st.error(f"指定されたフォルダが存在しません: {folder_path}")
             return
-        
-        # サポートされるファイル形式
         file_patterns = ['*.pdf', '*.docx', '*.txt']
         files = []
         for pattern in file_patterns:
             files.extend(glob.glob(os.path.join(folder_path, pattern)))
-        
         if not files:
             st.warning("指定されたフォルダに論文ファイルが見つかりません。")
             return
-        
         st.info(f"論文ファイル {len(files)} 件を処理中...")
-        
         all_chunks = []
         all_metadata = []
-        
         progress_bar = st.progress(0)
-        
         for i, file_path in enumerate(files):
-            # ファイルからテキスト抽出
             text = self.extract_text_from_file(file_path)
-            
             if text:
-                # テキストをチャンクに分割
                 chunks = self.chunk_text(text)
-                
                 for chunk in chunks:
                     all_chunks.append(chunk)
                     all_metadata.append({
@@ -266,67 +193,36 @@ class SimpleRAGSystem:
                         'filepath': file_path,
                         'chunk_text': chunk[:100] + "..." if len(chunk) > 100 else chunk
                     })
-            
             progress_bar.progress((i + 1) / len(files))
-        
         if not all_chunks:
             st.error("処理可能なテキストが見つかりませんでした。")
             return
-        
-        # 埋め込みベクトルを生成
         st.info("埋め込みベクトルを生成中...")
         progress_bar2 = st.progress(0)
-        
         embeddings = self._encode_texts(all_chunks)
         progress_bar2.progress(1.0)
-        
         if len(embeddings) == 0:
             st.error("埋め込みベクトルの生成に失敗しました。")
             return
-        
-        # FAISSインデックスを構築
         self.embedding_dim = embeddings.shape[1]
-        self.vector_db = faiss.IndexFlatIP(self.embedding_dim)  # Inner product for similarity
-        
-        # ベクトルを正規化
+        self.vector_db = faiss.IndexFlatIP(self.embedding_dim)
         faiss.normalize_L2(embeddings.astype(np.float32))
         self.vector_db.add(embeddings.astype(np.float32))
-        
         self.documents = all_chunks
         self.document_metadata = all_metadata
-        
         st.success(f"ベクトルデータベースの構築完了: {len(all_chunks)} チャンク")
-    
+
     def search_relevant_documents(self, query: str, top_k: int = 5) -> List[Dict]:
-        """
-        クエリに関連する文書を検索
-        
-        Args:
-            query: 検索クエリ
-            top_k: 取得する上位文書数
-            
-        Returns:
-            関連文書のリスト
-        """
         if self.vector_db is None:
             return []
-        
-        # 埋め込みモデルが読み込まれていない場合は読み込み
         if not self._load_embedding_model():
             return []
-        
         try:
-            # クエリの埋め込みベクトルを生成
             query_embeddings = self._encode_texts([query])
             if len(query_embeddings) == 0:
                 return []
-            
-            # 正規化
             faiss.normalize_L2(query_embeddings.astype(np.float32))
-            
-            # 類似文書を検索
             scores, indices = self.vector_db.search(query_embeddings.astype(np.float32), top_k)
-            
             results = []
             for score, idx in zip(scores[0], indices[0]):
                 if idx < len(self.documents):
@@ -335,11 +231,11 @@ class SimpleRAGSystem:
                         'metadata': self.document_metadata[idx],
                         'similarity_score': float(score)
                     })
-            
             return results
         except Exception as e:
             st.error(f"文書検索中にエラーが発生しました: {e}")
             return []
+
 
 class SimpleLLM:
     """
