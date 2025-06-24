@@ -31,7 +31,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import faiss
 import torch
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import numpy as np
 
 # Set matplotlib style
