@@ -250,33 +250,33 @@ class SimpleLLM:
         self._model_loaded = False
 
     def _load_model(self):
-    if self._model_loaded:
-        return True
-
-    try:
-        with st.spinner(f"言語モデル ({self.model_name}) をロード中..."):
-            cache_dir = os.path.join(os.getcwd(), "model_cache")
-            os.makedirs(cache_dir, exist_ok=True)
-
-            tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=cache_dir)
-            model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
-
-            # ✔ pipeline を保存
-            self.pipeline = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                device=-1  # CPU
-            )
-
-            self._model_loaded = True
-            st.success(f"✅ 言語モデルのロード完了")
+        if self._model_loaded:
             return True
-
-    except Exception as e:
-        st.error(f"言語モデルのロードに失敗しました: {e}")
-        st.info("💡 解決策: \n1. モデル名のスペル確認\n2. ネットワーク確認\n3. requirementsからsentencepieceを外す")
-        return False
+    
+        try:
+            with st.spinner(f"言語モデル ({self.model_name}) をロード中..."):
+                cache_dir = os.path.join(os.getcwd(), "model_cache")
+                os.makedirs(cache_dir, exist_ok=True)
+    
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=cache_dir)
+                model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
+    
+                # ✔ pipeline を保存
+                self.pipeline = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    device=-1  # CPU
+                )
+    
+                self._model_loaded = True
+                st.success(f"✅ 言語モデルのロード完了")
+                return True
+    
+        except Exception as e:
+            st.error(f"言語モデルのロードに失敗しました: {e}")
+            st.info("💡 解決策: \n1. モデル名のスペル確認\n2. ネットワーク確認\n3. requirementsからsentencepieceを外す")
+            return False
             
     def generate_response(self, prompt: str, max_tokens: int = 256) -> str:
         """
