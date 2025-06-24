@@ -1328,314 +1328,93 @@ def spectrum_analysis_mode():
                 else:
                     st.write("ピークが検出されませんでした")
             
-            # ファイルごとの描画
-            for result in peak_results:
-                file_key = result['file_name']
-            
-                # 初期化（除外対象リストと手動ピーク）
-                if f"{file_key}_excluded_peaks" not in st.session_state:
-                    st.session_state[f"{file_key}_excluded_peaks"] = set()
-                if f"{file_key}_manual_peaks" not in st.session_state:
-                    st.session_state[f"{file_key}_manual_peaks"] = []
-            
-                # 除外を反映したピークインデックス
-                filtered_peaks = [
-                    i for i in result['detected_peaks']
-                    if i not in st.session_state[f"{file_key}_excluded_peaks"]
-                ]
-                filtered_prominences = [
-                    prom for i, prom in zip(result['detected_peaks'], result['detected_prominences'])
-                    if i not in st.session_state[f"{file_key}_excluded_peaks"]
-                ]
-            
-                fig = make_subplots(
-                    rows=3, cols=1,
-                    shared_xaxes=True,
-                    subplot_titles=[
-                        f'{file_key} - {spectrum_type}',
-                        f'{file_key} - 微分スペクトル比較',
-                        f'{file_key} - Prominence vs 波数'
-                    ],
-                    vertical_spacing=0.07,
-                    row_heights=[0.4, 0.3, 0.3]
-                )
-            
-                # --- 上段スペクトル ---
-                fig.add_trace(
-                    go.Scatter(
-                        x=result['wavenum'],
-                        y=result['spectrum'],
-                        mode='lines',
-                        name=spectrum_type,
-                        line=dict(color='blue', width=1)
-                    ),
-                    row=1, col=1
-                )
-            
-                # 自動検出ピーク（有効なもののみ）
-                if len(filtered_peaks) > 0:
+                for result in peak_results:
+                    file_key = result['file_name']
+                    
+                    filtered_peaks = result['detected_peaks']
+                    filtered_prominences = result['detected_prominences']
+                
+                    fig = make_subplots(
+                        rows=3, cols=1,
+                        shared_xaxes=True,
+                        subplot_titles=[
+                            f'{file_key} - {spectrum_type}',
+                            f'{file_key} - 微分スペクトル比較',
+                            f'{file_key} - Prominence vs 波数'
+                        ],
+                        vertical_spacing=0.07,
+                        row_heights=[0.4, 0.3, 0.3]
+                    )
+                
+                    # 上段: スペクトル表示
                     fig.add_trace(
                         go.Scatter(
-                            x=result['wavenum'][filtered_peaks],
-                            y=result['spectrum'][filtered_peaks],
-                            mode='markers',
-                            name='検出ピーク（有効）',
-                            marker=dict(color='red', size=8, symbol='circle')
+                            x=result['wavenum'],
+                            y=result['spectrum'],
+                            mode='lines',
+                            name=spectrum_type,
+                            line=dict(color='blue', width=1)
                         ),
                         row=1, col=1
                     )
-            
-                # 除外されたピーク（×マークで表示）
-                excluded_peaks = list(st.session_state[f"{file_key}_excluded_peaks"])
-                if len(excluded_peaks) > 0:
+                
+                    if len(filtered_peaks) > 0:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=result['wavenum'][filtered_peaks],
+                                y=result['spectrum'][filtered_peaks],
+                                mode='markers',
+                                name='検出ピーク（有効）',
+                                marker=dict(color='red', size=8, symbol='circle')
+                            ),
+                            row=1, col=1
+                        )
+                
+                    # 中段: 2次微分表示
                     fig.add_trace(
                         go.Scatter(
-                            x=result['wavenum'][excluded_peaks],
-                            y=result['spectrum'][excluded_peaks],
-                            mode='markers',
-                            name='除外ピーク',
-                            marker=dict(color='gray', size=8, symbol='x')
+                            x=result['wavenum'],
+                            y=result['second_derivative'],
+                            mode='lines',
+                            name='2次微分',
+                            line=dict(color='purple', width=1)
                         ),
-                        row=1, col=1
+                        row=2, col=1
                     )
-            
-                # 手動ピーク
-                for x, y in st.session_state[f"{file_key}_manual_peaks"]:
+                
+                    fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5, row=2, col=1)
+                
+                    # 下段: Prominenceプロット
                     fig.add_trace(
                         go.Scatter(
-                            x=[x],
-                            y=[y],
-                            mode='markers+text',
-                            marker=dict(color='green', size=10, symbol='star'),
-                            text=["手動"],
-                            textposition='top center',
-                            name="手動ピーク",
-                            showlegend=False
-                        ),
-                        row=1, col=1
-                    )
-            
-                # --- 2次微分 ---
-                fig.add_trace(
-                    go.Scatter(
-                        x=result['wavenum'],
-                        y=result['second_derivative'],
-                        mode='lines',
-                        name='2次微分',
-                        line=dict(color='purple', width=1)
-                    ),
-                    row=2, col=1
-                )
-            
-                fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5, row=2, col=1)
-            
-                # --- Prominenceプロット ---
-                fig.add_trace(
-                    go.Scatter(
-                        x=result['wavenum'][result['all_peaks']],
-                        y=result['all_prominences'],
-                        mode='markers',
-                        name='全ピークのProminence',
-                        marker=dict(color='orange', size=4)
-                    ),
-                    row=3, col=1
-                )
-                if len(filtered_peaks) > 0:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=result['wavenum'][filtered_peaks],
-                            y=filtered_prominences,
+                            x=result['wavenum'][result['all_peaks']],
+                            y=result['all_prominences'],
                             mode='markers',
-                            name='有効なProminence',
-                            marker=dict(color='red', size=7, symbol='circle')
+                            name='全ピークのProminence',
+                            marker=dict(color='orange', size=4)
                         ),
                         row=3, col=1
                     )
-            
-                fig.update_layout(height=800, margin=dict(t=80, b=40))
-                fig.update_xaxes(title_text="波数 (cm⁻¹)", row=3, col=1)
-                fig.update_yaxes(title_text="強度", row=1, col=1)
-                fig.update_yaxes(title_text="微分値", row=2, col=1)
                 
-                # 現在の file_key を利用
-                event_key = f"{file_key}_click_event"
-                
-                # クリック取得
-                clicked_points = plotly_events(
-                    fig,
-                    click_event=True,
-                    hover_event=False,
-                    select_event=False,
-                    override_height=800,
-                    key=event_key
-                )
-                
-                # event_key を定義
-                event_key = f"{file_key}_click_event"
-                
-                # curveNumber==0（元スペクトル）のクリックだけ処理
-                clicked_main = [pt for pt in clicked_points if pt["curveNumber"] == 0]
-                
-                if clicked_main:
-                    pt = clicked_main[-1]
-                    click_id = str(pt['x']) + str(pt['y'])  # click_id の代替
-                
-                    last_click_id = st.session_state.get(f"{event_key}_last", None)
-                    if click_id != last_click_id:
-                        st.session_state[f"{event_key}_last"] = click_id
-                
-                        x = pt['x']
-                        y = pt['y']
-                        wavenum_arr = result['wavenum']
-                        spectrum_arr = result['spectrum']
-                        idx = np.argmin(np.abs(wavenum_arr - x))
-                
-                        # 自動検出ピークならトグル
-                        if idx in result['detected_peaks']:
-                            if idx in st.session_state[f"{file_key}_excluded_peaks"]:
-                                st.session_state[f"{file_key}_excluded_peaks"].remove(idx)
-                            else:
-                                st.session_state[f"{file_key}_excluded_peaks"].add(idx)
-                
-                        else:
-                            # すでに同じ場所に手動ピークがあれば追加しない
-                            is_duplicate = any(abs(existing_x - x) < 1.0 for existing_x, _ in st.session_state[f"{file_key}_manual_peaks"])
-                            if not is_duplicate:
-                                st.session_state[f"{file_key}_manual_peaks"].append((x, y))
-                
-                # セッションフラグの初期化（ファイルごと）
-                if f"show_info_{file_key}" not in st.session_state:
-                    st.session_state[f"show_info_{file_key}"] = False
-                
-                # 「手動ピークの情報を表示」ボタンを押したらフラグをTrueに
-                if st.button("🔍 手動ピークの情報を表示", key=f"show_manual_info_{file_key}"):
-                    st.session_state[f"show_info_{file_key}"] = True
-                
-                # 表示フラグに応じて手動情報とグリッドサーチ処理を実行
-                if st.session_state[f"show_info_{file_key}"]:
-                
-                    manual_peaks = st.session_state.get(f"{file_key}_manual_peaks", [])
-                    excluded_peaks = st.session_state.get(f"{file_key}_excluded_peaks", set())
-                
-                    wavenum = result['wavenum']
-                    spectrum = result['spectrum']
-                    second_derivative = result['second_derivative']
-                
-                    # --- 手動で追加されたピーク情報 ---
-                    manual_peak_table = []
-                    if manual_peaks:
-                        for x, y in manual_peaks:
-                            idx = np.argmin(np.abs(wavenum - x))
-                            window_size = 3
-                            local_start = max(0, idx - window_size)
-                            local_end = min(len(second_derivative), idx + window_size + 1)
-                            local_window = -second_derivative[local_start:local_end]
-                            local_max_idx = np.argmax(local_window)
-                            peak_idx = local_start + local_max_idx
-                
-                            try:
-                                prom = peak_prominences(-second_derivative, [peak_idx])[0][0]
-                            except Exception:
-                                prom = 0.0
-                
-                            manual_peak_table.append({
-                                "波数 (cm⁻¹)": f"{x:.1f}",
-                                "強度": f"{y:.3f}",
-                                "Prominence": f"{prom:.3f}"
-                            })
-                
-                        st.write(f"**{file_key} の手動で追加されたピーク:**")
-                        st.table(pd.DataFrame(manual_peak_table))
-                    else:
-                        st.info("手動で追加されたピークはありません。")
-                
-                    # --- 手動で除外されたピーク情報 ---
-                    excluded_table = []
-                    if excluded_peaks:
-                        for idx in sorted(excluded_peaks):
-                            if idx < len(wavenum):
-                                x = wavenum[idx]
-                                y = spectrum[idx]
-                                try:
-                                    prom = peak_prominences(-second_derivative, [idx])[0][0]
-                                except Exception:
-                                    prom = 0.0
-                
-                                excluded_table.append({
-                                    "波数 (cm⁻¹)": f"{x:.1f}",
-                                    "強度": f"{y:.3f}",
-                                    "Prominence": f"{prom:.3f}"
-                                })
-                
-                        st.write(f"**{file_key} の手動で除外された（除外マーク付き）ピーク:**")
-                        st.table(pd.DataFrame(excluded_table))
-                    else:
-                        st.info("手動で除外されたピークはありません。")
-                
-                    # 手動追加ピークを (x, y) のタプルに変換
-                    manual_add = [
-                        (float(row["波数 (cm⁻¹)"]), float(row["強度"]))
-                        for row in manual_peak_table
-                    ]
-                
-                    # 除外ピークインデックス（波数から逆引きして index を計算）
-                    manual_exclude = set()
-                    for row in excluded_table:
-                        x = float(row["波数 (cm⁻¹)"])
-                        idx4 = np.argmin(np.abs(wavenum - x))
-                        manual_exclude.add(idx4)
-                
-                    # グリッドサーチ実行ボタン
-                    if st.button("🔁 グリッドサーチ適用（最適閾値を探索）", key=f"optimize_{file_key}"):
-                        result_opt = optimize_thresholds_via_gridsearch(
-                            wavenum=wavenum,
-                            spectrum=spectrum,
-                            second_derivative=second_derivative,
-                            manual_add_peaks=manual_add,
-                            manual_exclude_indices=manual_exclude,
-                            current_prom_thres=st.session_state['prominence_threshold'],
-                            current_deriv_thres=st.session_state['second_deriv_threshold'],
-                            detected_original_peaks=result["detected_peaks"],
-                            resolution=40
+                    if len(filtered_peaks) > 0:
+                        fig.add_trace(
+                            go.Scatter(
+                                x=result['wavenum'][filtered_peaks],
+                                y=filtered_prominences,
+                                mode='markers',
+                                name='有効なProminence',
+                                marker=dict(color='red', size=7, symbol='circle')
+                            ),
+                            row=3, col=1
                         )
-                    
-                        st.session_state[f"{file_key}_grid_result"] = result_opt
-
-                        # `_temp` に保存（UIにはこの値が反映される）
-                        st.session_state["prominence_threshold_temp"] = float(result_opt["prominence_threshold"])
-                        st.session_state["second_deriv_threshold_temp"] = float(result_opt["second_deriv_threshold"])
-                        
-                        st.rerun()
-                    # グリッドサーチ結果がセッションにあれば表示
-                    if f"{file_key}_grid_result" in st.session_state:
-                        result_grid = st.session_state[f"{file_key}_grid_result"]
-                        st.success(f"""
-                        ✅ グリッドサーチ最適化結果:
-                        - Prominence: {result_grid['prominence_threshold']:.4f}
-                        - 微分閾値: {result_grid['second_deriv_threshold']:.4f}
-                        - スコア: {result_grid['score']}
-                        """)
-                    
-                        # 最適値を入力欄に反映（ただし "初回のみ" の制限あり）
-                        if "prominence_threshold" not in st.session_state:
-                            st.session_state["prominence_threshold"] = result_grid["prominence_threshold"]
-                        if "second_deriv_threshold" not in st.session_state:
-                            st.session_state["second_deriv_threshold"] = result_grid["second_deriv_threshold"]  
-                    
-                        # ピーク検出を再実行するボタン（手動追加・除外もリセット）
-                        # グリッドサーチ結果で再検出
-                        if st.button("🔄 グリッドサーチ結果で再検出", key=f"reapply_{file_key}"):
-                            st.session_state[f"{file_key}_manual_peaks"] = []
-                            st.session_state[f"{file_key}_excluded_peaks"] = set()
-                        
-                            # セッションに一時的に保存（直接再代入しない）
-                            st.session_state["prominence_threshold_temp"] = float(result_grid["prominence_threshold"])
-                            st.session_state["second_deriv_threshold_temp"] = float(result_grid["second_deriv_threshold"])
-                        
-                            # ピーク検出再実行フラグ
-                            st.session_state["peak_detection_triggered"] = True
-                        
-                            st.rerun()
+                
+                    fig.update_layout(height=800, margin=dict(t=80, b=40))
+                    fig.update_xaxes(title_text="波数 (cm⁻¹)", row=3, col=1)
+                    fig.update_yaxes(title_text="強度", row=1, col=1)
+                    fig.update_yaxes(title_text="微分値", row=2, col=1)
+                
+                    # ✅ Cloud互換のため st.plotly_chart を使用
+                    st.plotly_chart(fig, use_container_width=True)
                 
                 # AI解析セクション - ピーク確定後の考察機能
                 st.markdown("---")
