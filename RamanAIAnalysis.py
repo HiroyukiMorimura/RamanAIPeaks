@@ -1327,22 +1327,6 @@ def spectrum_analysis_mode():
                         'prominence': prom,
                         'type': 'auto'
                     })
-                
-                # 手動追加ピーク
-                for x, y in st.session_state[f"{file_key}_manual_peaks"]:
-                    idx = np.argmin(np.abs(result['wavenum'] - x))
-                    try:
-                        prom = peak_prominences(-result['second_derivative'], [idx])[0][0]
-                    except:
-                        prom = 0.0
-                    
-                    final_peak_data.append({
-                        'wavenumber': x,
-                        'intensity': y,
-                        'prominence': prom,
-                        'type': 'manual'
-                    })
-                
                 if final_peak_data:
                     st.write(f"**最終確定ピーク数: {len(final_peak_data)}**")
                     
@@ -1359,32 +1343,32 @@ def spectrum_analysis_mode():
                     ])
                     
                     # 基本解析情報の表示（常に表示）
-                    st.info("🔬 基本解析情報")
-                    st.write("検出されたピークの化学的解釈：")
+                    # st.info("🔬 基本解析情報")
+                    # st.write("検出されたピークの化学的解釈：")
                     
                     # 基本的なピーク解釈
-                    analyzer = RamanSpectrumAnalyzer()
-                    basic_analysis = analyzer._generate_basic_analysis(final_peak_data)
-                    st.markdown(basic_analysis)
+                    # analyzer = RamanSpectrumAnalyzer()
+                    # basic_analysis = analyzer._generate_basic_analysis(final_peak_data)
+                    # st.markdown(basic_analysis)
                     
                     # 基本レポートのダウンロード
-                    basic_report = f"""ラマンスペクトル基本解析レポート
-ファイル名: {file_key}
-解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    # basic_report = f"""ラマンスペクトル基本解析レポート
+# ファイル名: {file_key}
+# 解析日時: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-=== 検出ピーク情報 ===
-{peak_summary_df.to_string(index=False)}
+# === 検出ピーク情報 ===
+# {peak_summary_df.to_string(index=False)}
 
-=== 基本解析 ===
-{basic_analysis}
-"""
-                    st.download_button(
-                        label="📄 基本解析レポートをダウンロード",
-                        data=basic_report,
-                        file_name=f"raman_basic_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        mime="text/plain",
-                        key=f"download_basic_report_{file_key}"
-                    )
+# === 基本解析 ===
+# {basic_analysis}
+# """
+                    # st.download_button(
+                    #     label="📄 基本解析レポートをダウンロード",
+                    #     data=basic_report,
+                    #     file_name=f"raman_basic_report_{file_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    #     mime="text/plain",
+                    #     key=f"download_basic_report_{file_key}"
+                    # )
                     
                     # AI解析実行ボタン（AI機能有効時のみ表示）
                     if enable_ai:
