@@ -16,7 +16,7 @@ python-docx>=0.8.11
 transformers[sentencepiece]>=4.35.0
 torch>=2.0.0
 tokenizers>=0.14.0
-sentencepiece>=0.1.99
+sentencepiece==0.1.99
 protobuf>=3.20.0
 
 # RAG機能（ベクトル検索など）
