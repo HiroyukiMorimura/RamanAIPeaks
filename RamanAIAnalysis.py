@@ -362,14 +362,12 @@ class SimpleLLM:
                 tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=cache_dir)
                 model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
 
-                self.pipeline = pipeline(
+                
+                generator = pipeline(
                     "text-generation",
-                    model=model,
-                    tokenizer=tokenizer,
-                    device=-1,
-                    do_sample=True,
-                    temperature=0.7,
-                    max_new_tokens=512
+                    model="cyberagent/open-calm-small",
+                    tokenizer="cyberagent/open-calm-small",
+                    device=-1  # CPU
                 )
 
                 self._model_loaded = True
