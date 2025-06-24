@@ -356,6 +356,13 @@ class SimpleLLM:
         self.model_name = model_name
         self.pipeline = None
         self._model_loaded = False
+
+        # tokenizer と model を初期化
+        cache_dir = os.path.join(os.getcwd(), "model_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=False, cache_dir=cache_dir)
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
     
     def _load_model(self):
         """
