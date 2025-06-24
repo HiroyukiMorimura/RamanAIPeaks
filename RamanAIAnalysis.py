@@ -821,17 +821,14 @@ def spectrum_analysis_mode():
     # RAG機能の有効/無効を選択
     enable_rag = st.sidebar.checkbox(
         "📚 RAG機能を有効にする",
-        value=False,
+        value=True,
         help="論文データベースからの情報検索機能。無効にすると軽量化されます。"
     )
     
     # Mistralモデル選択
     model_options = [
-        "cyberagent/open-calm-small",
+        "cl-tohoku/bert-base-japanese",
         "microsoft/DialoGPT-medium",  # より軽量な代替モデル
-        "mistralai/Mistral-7B-Instruct-v0.2",
-        "mistralai/Mistral-7B-Instruct-v0.1",
-        "mistralai/Mixtral-8x7B-Instruct-v0.1"
     ]
     
     selected_model = st.sidebar.selectbox(
