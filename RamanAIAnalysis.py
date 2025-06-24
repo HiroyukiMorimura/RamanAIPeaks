@@ -1347,7 +1347,7 @@ def spectrum_analysis_mode():
                     # st.write("検出されたピークの化学的解釈：")
                     
                     # 基本的なピーク解釈
-                    # analyzer = RamanSpectrumAnalyzer()
+                    analyzer = RamanSpectrumAnalyzer()
                     # basic_analysis = analyzer._generate_basic_analysis(final_peak_data)
                     # st.markdown(basic_analysis)
                     
