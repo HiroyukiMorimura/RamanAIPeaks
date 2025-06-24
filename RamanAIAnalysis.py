@@ -346,7 +346,7 @@ class SimpleLLM:
     シンプルなLLMクラス（軽量版）
     """
     
-    def __init__(self, model_name="rinna/japanese-gpt2-small"):
+    def __init__(self, model_name="rinna/japanese-gpt2-medium"):
         """
         LLMの初期化
         
@@ -967,7 +967,7 @@ def spectrum_analysis_mode():
     
     # Mistralモデル選択
     model_options = [
-        "rinna/japanese-gpt2-small",
+        "rinna/japanese-gpt2-medium",
         "microsoft/DialoGPT-medium",  # より軽量な代替モデル
         "mistralai/Mistral-7B-Instruct-v0.2",
         "mistralai/Mistral-7B-Instruct-v0.1",
