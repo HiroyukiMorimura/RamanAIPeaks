@@ -23,3 +23,9 @@ faiss-cpu>=1.7.4
 
 # 軽量化のための設定
 accelerate>=0.24.0
+
+transformers[sentencepiece]
+torch
+sentencepiece
+protobuf
+tokenizers
