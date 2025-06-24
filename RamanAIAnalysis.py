@@ -346,74 +346,42 @@ class SimpleLLM:
     シンプルなLLMクラス（軽量版）
     """
     
+    class SimpleLLM:
     def __init__(self, model_name="rinna/japanese-gpt2-medium"):
-        """
-        LLMの初期化
-        
-        Args:
-            model_name: 使用するモデル名
-        """
         self.model_name = model_name
         self.pipeline = None
         self._model_loaded = False
 
-        # tokenizer と model を初期化
-        cache_dir = os.path.join(os.getcwd(), "model_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, use_fast=False, cache_dir=cache_dir)
-        self.model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
-    
     def _load_model(self):
-        """
-        モデルをロード
-        """
         if self._model_loaded:
             return True
-            
+
         try:
             with st.spinner(f"言語モデル ({self.model_name}) をロード中..."):
-                # キャッシュディレクトリを設定
                 cache_dir = os.path.join(os.getcwd(), "model_cache")
                 os.makedirs(cache_dir, exist_ok=True)
-                
-                # 軽量モデルの場合の処理
-                if "DialoGPT" in self.model_name:
-                    self.pipeline = pipeline(
-                        "text-generation",
-                        model=self.model_name,
-                        device=-1,  # CPU使用を強制
-                        torch_dtype=torch.float32,
-                        cache_dir=cache_dir,
-                        trust_remote_code=True,
-                        max_length=512,
-                        do_sample=True,
-                        temperature=0.7
-                    )
-                else:
-                    # Mistralなど他のモデル
-                    self.pipeline = pipeline(
-                        "text-generation",
-                        model=self.model_name,
-                        device=-1,  # CPU使用を強制
-                        torch_dtype=torch.float32,
-                        cache_dir=cache_dir,
-                        trust_remote_code=True,
-                        do_sample=True,
-                        temperature=0.3,
-                        max_new_tokens=512,
-                        return_full_text=False
-                    )
-                
+
+                tokenizer = AutoTokenizer.from_pretrained(self.model_name, cache_dir=cache_dir)
+                model = AutoModelForCausalLM.from_pretrained(self.model_name, cache_dir=cache_dir)
+
+                self.pipeline = pipeline(
+                    "text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    device=-1,
+                    do_sample=True,
+                    temperature=0.7,
+                    max_new_tokens=512
+                )
+
                 self._model_loaded = True
                 st.success(f"✅ 言語モデルのロード完了")
                 return True
-                
+
         except Exception as e:
             st.error(f"言語モデルのロードに失敗しました: {e}")
-            st.info("💡 解決策: \n1. インターネット接続を確認\n2. AI機能を無効にして基本機能のみ使用")
+            st.info("💡 解決策: \n1. モデル名のスペル確認\n2. ネットワーク確認\n3. requirementsからsentencepieceを外す")
             return False
-    
     def generate_response(self, prompt: str, max_tokens: int = 256) -> str:
         """
         プロンプトに対する応答を生成
