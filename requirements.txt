@@ -27,3 +27,4 @@ huggingface-hub>=0.17.0
 # 日本語モデル用トークナイザ
 fugashi>=1.2.1
 ipadic>=1.0.0
+unidic-lite>=1.0.8
