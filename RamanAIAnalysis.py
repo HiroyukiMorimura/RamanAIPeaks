@@ -345,8 +345,6 @@ class SimpleLLM:
     """
     シンプルなLLMクラス（軽量版）
     """
-    
-    class SimpleLLM:
     def __init__(self, model_name="rinna/japanese-gpt2-medium"):
         self.model_name = model_name
         self.pipeline = None
